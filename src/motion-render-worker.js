@@ -63,7 +63,15 @@ process.on('message', async (request) => {
       // 先把这件事说出来，别让它看起来像"卡死"（issue #22）。
       send({ type: 'progress', phase: 'browser', progress: 0, message: '没找到本机 Chrome / Edge，正在下载内置浏览器；首次会慢一些' })
     }
-    browser = await openBrowser('chrome', { browserExecutable, logLevel: 'error' }).catch((error) => {
+    // 强制软件光栅化：绕过 GPU 合成层的回收逻辑。
+    // 2026-11-15 实测：默认 ANGLE 下偶发「整块图层缺失」的坏帧（整屏亮度跳 5 级），
+    // 换 swiftshader 后连续 4 轮全长渲染零坏帧，速度无损失。
+    // 回 GPU：DRAWAI_GL=off；换后端：DRAWAI_GL=angle|swangle|egl。
+    const GL = process.env.DRAWAI_GL === 'off' ? '' : (process.env.DRAWAI_GL || 'swiftshader')
+    const EXTRA_ARGS = (process.env.DRAWAI_ARGS || '').split(' ').filter(Boolean)
+    const chromiumOptions = { ...(GL ? { gl: GL } : {}), ...(EXTRA_ARGS.length ? { args: EXTRA_ARGS } : {}) }
+    browser = await openBrowser('chrome', { browserExecutable, logLevel: 'error',
+      ...(Object.keys(chromiumOptions).length ? { chromiumOptions } : {}) }).catch((error) => {
       const detail = error?.message || String(error)
       throw new Error(browserExecutable
         ? `打开本机浏览器失败（${browserExecutable}）：${detail}`
